@@ -207,6 +207,13 @@ def build(args) -> None:
             shutil.copy2(f, lic / f.name)
     apps = discover_apps(source)
     (lic / "apps.json").write_text(json.dumps(apps, indent=2), encoding="utf-8")
+    ns: dict = {}
+    exec(git_bytes(source, "show", "HEAD:core/permissions.py").decode("utf-8"), ns)
+    tree = {m: {"label": v.get("label", m),
+                "tabs": {t: {"label": tv.get("label", t), "elements": dict(tv.get("elements") or {})}
+                         for t, tv in (v.get("tabs") or {}).items()}}
+            for m, v in ns["PERMISSION_TREE"].items()}
+    (lic / "permission_tree.json").write_text(json.dumps(tree, indent=1), encoding="utf-8")
     (lic / "update_config.json").write_text(json.dumps({"repo": args.repo}), encoding="utf-8")
     say("apps found: " + ", ".join(a["key"] for a in apps))
 
