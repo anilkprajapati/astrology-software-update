@@ -251,7 +251,7 @@ def run_in_window(existing_port: int | None) -> None:
     import webview
     WEBVIEW_DIR.mkdir(parents=True, exist_ok=True)
     webview.settings["ALLOW_DOWNLOADS"] = True
-    window = webview.create_window(TITLE, html=SPLASH, width=1366, height=860, min_size=(900, 600), text_select=True)
+    window = webview.create_window(TITLE, html=SPLASH, width=1366, height=860, min_size=(900, 600), text_select=True, maximized=True)
     window.events.loaded += lambda: _safe_eval(window, PAGE_SHIM)
     box: dict = {"proc": None, "restart": False}
 
