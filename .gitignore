@@ -1,0 +1,5 @@
+out/
+build/
+source/
+data/
+__pycache__/
