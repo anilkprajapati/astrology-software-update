@@ -96,16 +96,22 @@ def find_updates(have: int, timeout: float = 6.0) -> list[dict]:
 
 
 def verify_file(path: Path, signature_b64: str) -> bool:
+    """True when the owner's signature checks out against ANY key this program trusts: the license key it shipped with, or
+    (if present) update_public.pem -- the separate update-signing key a Mac release machine can hold."""
     try:
         from cryptography.exceptions import InvalidSignature
         from cryptography.hazmat.primitives import serialization
         digest = hashlib.sha256(path.read_bytes()).digest()
-        public_key = serialization.load_pem_public_key(PUBLIC_KEY_FILE.read_bytes())
-        try:
-            public_key.verify(base64.b64decode(signature_b64.strip()), _SIGN_PREFIX + digest)
-            return True
-        except InvalidSignature:
-            return False
+        signature = base64.b64decode(signature_b64.strip())
+        for key_file in (HERE / "update_public.pem", PUBLIC_KEY_FILE):
+            if not key_file.exists():
+                continue
+            try:
+                serialization.load_pem_public_key(key_file.read_bytes()).verify(signature, _SIGN_PREFIX + digest)
+                return True
+            except InvalidSignature:
+                continue
+        return False
     except Exception:
         return False
 
