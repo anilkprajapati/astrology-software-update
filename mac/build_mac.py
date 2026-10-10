@@ -51,7 +51,7 @@ def git_bytes(source: Path, *args: str) -> bytes:
 
 
 # ---------------------------------------------------------------- app source
-def stage_app(source: Path, app: Path, places: Path | None) -> None:
+def stage_app(source: Path, app: Path, places: Path | None, data_files: bool = True) -> None:
     say("copying the application source ...")
     data = git_bytes(source, "archive", "--format=tar", "HEAD")
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
@@ -65,6 +65,8 @@ def stage_app(source: Path, app: Path, places: Path | None) -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             with tar.extractfile(m) as s, open(dst, "wb") as o:
                 shutil.copyfileobj(s, o)
+    if not data_files:
+        return                      # code-only update: no city database, no ephemeris file
     if places and places.is_file():
         (app / "place_database").mkdir(parents=True, exist_ok=True)
         shutil.copy2(places, app / "place_database" / "places.db")
@@ -185,6 +187,54 @@ they will give you a license key for this Mac. After you enter it the program st
 """
 
 
+def stage_licensing(lic: Path, source: Path, repo: str) -> list:
+    """licensing/ of the app: the shared code, the apps found in the source, the permission list and the update repo."""
+    lic.mkdir(parents=True, exist_ok=True)
+    for f in (ROOT / "mac" / "licensing").iterdir():
+        if f.is_file() and f.name not in ("apps.json", "update_config.json"):
+            shutil.copy2(f, lic / f.name)
+    apps = discover_apps(source)
+    (lic / "apps.json").write_text(json.dumps(apps, indent=2), encoding="utf-8")
+    ns: dict = {}
+    exec(git_bytes(source, "show", "HEAD:core/permissions.py").decode("utf-8"), ns)
+    tree = {m: {"label": v.get("label", m),
+                "tabs": {t: {"label": tv.get("label", t), "elements": dict(tv.get("elements") or {})}
+                         for t, tv in (v.get("tabs") or {}).items()}}
+            for m, v in ns["PERMISSION_TREE"].items()}
+    (lic / "permission_tree.json").write_text(json.dumps(tree, indent=1), encoding="utf-8")
+    (lic / "update_config.json").write_text(json.dumps({"repo": repo}), encoding="utf-8")
+    return apps
+
+
+def auto_version(source: Path) -> str:
+    """1.<year>.<mmdd>.<commits in the source repo + mac/revision.txt> -- same scheme as the Windows build."""
+    import datetime as dt
+    count = int(git_bytes(source, "rev-list", "--count", "HEAD").decode().strip())
+    try:
+        revision = int((ROOT / "mac" / "revision.txt").read_text().strip())
+    except (OSError, ValueError):
+        revision = 0
+    today = dt.date.today()
+    return f"1.{today:%Y}.{today:%m%d}.{count + revision}"
+
+
+def build_update_only(args) -> Path:
+    """The code-only update zip (web app code + licensing + version) -- seconds, no Python download, no .dmg."""
+    source = Path(args.source).resolve()
+    shutil.rmtree(WORK, ignore_errors=True)
+    upd_root = WORK / "update"
+    upd_root.mkdir(parents=True)
+    OUT.mkdir(exist_ok=True)
+    stage_app(source, upd_root / "app", None, data_files=False)
+    apps = stage_licensing(upd_root / "licensing", source, args.repo)
+    say("apps found: " + ", ".join(a["key"] for a in apps))
+    (upd_root / "version.txt").write_text(args.version, encoding="utf-8")
+    zip_base = OUT / f"AstroRishi-Mac-Update-{args.version}"
+    shutil.make_archive(str(zip_base), "zip", upd_root)
+    say(f"done: {zip_base.name}.zip")
+    return Path(str(zip_base) + ".zip")
+
+
 def build(args) -> None:
     source = Path(args.source).resolve()
     arch = args.arch or ("arm64" if platform.machine() == "arm64" else "x86_64")
@@ -201,20 +251,7 @@ def build(args) -> None:
     install_packages(res / "python", source)
 
     lic = res / "licensing"
-    lic.mkdir()
-    for f in (ROOT / "mac" / "licensing").iterdir():
-        if f.is_file() and f.name not in ("apps.json", "update_config.json"):
-            shutil.copy2(f, lic / f.name)
-    apps = discover_apps(source)
-    (lic / "apps.json").write_text(json.dumps(apps, indent=2), encoding="utf-8")
-    ns: dict = {}
-    exec(git_bytes(source, "show", "HEAD:core/permissions.py").decode("utf-8"), ns)
-    tree = {m: {"label": v.get("label", m),
-                "tabs": {t: {"label": tv.get("label", t), "elements": dict(tv.get("elements") or {})}
-                         for t, tv in (v.get("tabs") or {}).items()}}
-            for m, v in ns["PERMISSION_TREE"].items()}
-    (lic / "permission_tree.json").write_text(json.dumps(tree, indent=1), encoding="utf-8")
-    (lic / "update_config.json").write_text(json.dumps({"repo": args.repo}), encoding="utf-8")
+    apps = stage_licensing(lic, source, args.repo)
     say("apps found: " + ", ".join(a["key"] for a in apps))
 
     shutil.copy2(HERE / "launcher.py", res / "launcher.py")
@@ -258,7 +295,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True)
     ap.add_argument("--places", help="places.db to ship")
-    ap.add_argument("--version", required=True)
+    ap.add_argument("--version", help="default: automatic (source commit count + mac/revision.txt)")
+    ap.add_argument("--update-only", action="store_true", help="only the small code update zip (fast), no .dmg")
     ap.add_argument("--repo", default="anilkprajapati/astrology-software-update")
     ap.add_argument("--arch", choices=["arm64", "x86_64"])
-    build(ap.parse_args())
+    parsed = ap.parse_args()
+    parsed.version = parsed.version or auto_version(Path(parsed.source).resolve())
+    (build_update_only if parsed.update_only else build)(parsed)
