@@ -1,0 +1,62 @@
+[
+  {
+    "key": "nadi",
+    "label": "Nadi Astrology",
+    "prefix": "/nadi"
+  },
+  {
+    "key": "numerology",
+    "label": "Numerology",
+    "prefix": "/numerology"
+  },
+  {
+    "key": "nadi_numero",
+    "label": "Num+Nadi",
+    "prefix": "/nadi-numero"
+  },
+  {
+    "key": "horary",
+    "label": "Horary / Prashna",
+    "prefix": "/horary"
+  },
+  {
+    "key": "matchmaking",
+    "label": "Matchmaking",
+    "prefix": "/matchmaking"
+  },
+  {
+    "key": "vedic_cards",
+    "label": "Vedic Cards",
+    "prefix": "/vedic-cards"
+  },
+  {
+    "key": "vastu",
+    "label": "Vastu",
+    "prefix": "/vastu"
+  },
+  {
+    "key": "hindu_calendar",
+    "label": "Panchang",
+    "prefix": "/hindu-calendar"
+  },
+  {
+    "key": "mobile_numerology",
+    "label": "Mobile Numerology",
+    "prefix": "/mobile-numerology"
+  },
+  {
+    "key": "name_correction",
+    "label": "Name Correction",
+    "prefix": "/name-correction"
+  },
+  {
+    "key": "parashari",
+    "label": "Parashari",
+    "prefix": "/parashari"
+  },
+  {
+    "key": "jaimini",
+    "label": "Jaimini",
+    "prefix": "/jaimini"
+  }
+]
