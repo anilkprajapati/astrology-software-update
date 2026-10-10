@@ -40,6 +40,15 @@ PUBLIC_KEY_FILE = HERE / "license_public.pem"
 _PREFIX = "ASTRO"
 
 
+def app_version() -> str:
+    """The short version people see ("v0.1"). Set by the owner in display_version.txt (shipped next to this file)."""
+    try:
+        text = (HERE / "display_version.txt").read_text(encoding="utf-8").strip()
+        return "v" + text.lstrip("vV") if text else ""
+    except OSError:
+        return ""
+
+
 # ---------------------------------------------------------------- machine identity
 def machine_id() -> str:
     """A stable id for THIS PC, shown to the user as XXXXX-XXXXX-XXXXX-XXXXX (20 hex digits)."""
@@ -211,6 +220,7 @@ def render_page(message: str = "", kind: str = "bad") -> bytes:
         '<p class="muted">This copy of the software is licensed for one computer. Send the Machine ID below to the '
         'person who supplied the software; they will give you a license key for this PC.</p>'
         + _mid_block() + _msg(message, kind) + _key_form()
+        + f'<p class="muted" style="margin-top:1rem">Astro Rishi {html.escape(app_version())}</p>'
     )
     return _ACTIVATE.replace("__TITLE__", "Activate Astro Rishi").replace("__HEADING__", "Activate Astro Rishi") \
         .replace("__CSS__", _CSS).replace("__BODY__", body).encode("utf-8")
@@ -236,6 +246,7 @@ def render_license_page(ent: Entitlement, message: str = "", kind: str = "ok") -
         + _apps_chips(ent) + _mid_block()
         + '<hr><details><summary>Enter a new license key (renewal or more apps)</summary>' + _key_form("Apply key")
         + '</details>'
+        + f'<p class="muted" style="margin-top:1rem">Astro Rishi {html.escape(app_version())}</p>'
         + '<p style="margin-top:1rem"><a class="btn" href="/">Back to Astro Rishi</a></p>')
     return _ACTIVATE.replace("__TITLE__", "License").replace("__HEADING__", "Your license") \
         .replace("__CSS__", _CSS).replace("__BODY__", body).encode("utf-8")
@@ -258,7 +269,7 @@ def _injection(ent: Entitlement) -> bytes:
     if not ent.admin_panel:
         blocked.append("/admin")
     days = ent.days_left()
-    badge = ent.plan_label
+    badge = ent.plan_label + (f" · {app_version()}" if app_version() else "")
     if days is not None and (ent.plan == "trial" or days <= 30):
         badge += f" · {max(days, 0)} day{'s' if days != 1 else ''} left"
     script = ""
