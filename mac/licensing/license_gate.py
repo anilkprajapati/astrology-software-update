@@ -275,8 +275,15 @@ def _injection(ent: Entitlement) -> bytes:
     badge = ent.plan_label + (f" · {app_version()}" if app_version() else "")
     if days is not None and (ent.plan == "trial" or days <= 30):
         badge += f" · {max(days, 0)} day{'s' if days != 1 else ''} left"
-    hide_login = ("<style>a[href=\"/login\"],a[href=\"/signup\"],a[href=\"/forgot-password\"],"
-                  "form[action=\"/logout\"]{display:none!important}</style>")
+    # No sign-in in the desktop program: the "admin v" account menu (Profile / Logout) and the new-sign-ups bell are hidden;
+    # a plain Admin link takes their place when the key includes the Admin panel.
+    admin_link = ""
+    if ent.admin_panel:
+        admin_link = ("<script>(function(){var a=document.querySelector('header .account');if(!a)return;"
+                      "var l=document.createElement('a');l.href='/admin';l.textContent='Admin';l.className='btn secondary';"
+                      "l.style.cssText='padding:0.3rem 0.8rem;margin-left:0.4rem;';a.appendChild(l);})();</script>")
+    hide_login = ("<style>a[href=\"/login\"],a[href=\"/signup\"],a[href=\"/forgot-password\"],form[action=\"/logout\"],"
+                  "#account-dropdown,#new-signups-dropdown{display:none!important}</style>" + admin_link)
     script = ""
     if blocked:
         script = ("<script>(function(){var b=" + json.dumps(blocked) + ";document.querySelectorAll('a[href]').forEach(function(a){"
