@@ -39,12 +39,18 @@ Release repository on GitHub → **Actions → Build Mac app → Run workflow**.
 under *Artifacts*: `AstroRishi-Mac-arm64` (Apple Silicon `.dmg`) and `AstroRishi-Mac-x86_64` (Intel `.dmg`), plus
 `AstroRishi-Mac-Update` (the code-only update zip). Hand the `.dmg` to Mac customers.
 
-## Update installed Macs (after you have shared the app)
-1. Run the workflow again and download the `AstroRishi-Mac-Update` artifact.
-2. In `Admin`: `build\venv\Scripts\python.exe mac_tools.py release path\to\AstroRishi-Mac-Update-<version>.zip` — it signs
-   the file with your private key (which never leaves your PC) and publishes it as pre-release `mac-v<version>`.
-   (Hold the release back while `Admin\build\hold_publishing.flag` is your reminder that nothing is shared yet.)
-3. A change in `requirements.txt` (new Python packages) needs a new `.dmg` — code-only updates cannot add packages.
+## Update installed Macs (simple flow, all on the Mac)
+License keys are still made on Windows (Key Maker). Everything else for Mac happens on the Mac:
+1. `git pull` in your `v2_astrology` clone (the web app changes) and in this release-repo clone (packaging / licensing changes).
+2. `python3 mac/mac_release.py update --source ../v2_astrology` -- builds the small code update, signs it with the Mac update key
+   and publishes it to GitHub. Installed Macs offer it the next time they start.
+- **One-time setup on the Mac:** `pip3 install cryptography requests`; `python3 mac/mac_release.py setup` (creates the Mac *update*
+  key -- not a license key; commit + push `mac/licensing/update_public.pem`); save a GitHub token (Contents: read + write on the
+  release repo) in `mac/keys/github_token.txt`. `mac/keys/` is git-ignored -- back it up, never share it.
+- **First time only:** installed Macs built before this do not know the Mac update key yet. Send them ONE update signed by the Windows
+  key (build the zip with `python3 mac/build_mac.py --update-only ...`, copy it to the Windows PC, `mac_tools.py release <zip>`);
+  after they install it they accept updates signed on the Mac.
+- A change in `requirements.txt` (new Python packages) or in `mac/launcher.py` needs a new `.dmg`: `python3 mac/build_mac.py --source ../v2_astrology --places <places.db>`.
 
 ## After you change the licensing code in `Admin\licensing`
 Run `build\venv\Scripts\python.exe mac_tools.py sync` in `Admin`, then commit + push this folder.
