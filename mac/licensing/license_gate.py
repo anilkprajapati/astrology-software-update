@@ -86,6 +86,7 @@ class Entitlement:
     apps: set = field(default_factory=lambda: set(plans.APP_KEYS))
     admin_panel: bool = True
     expires: dt.date | None = None
+    perm_deny: frozenset = frozenset()      # "module/tab" and "module/tab/element" the key switches OFF
 
     @property
     def plan_label(self) -> str:
@@ -108,7 +109,9 @@ def _entitlement_from_payload(payload: dict) -> Entitlement:
             expires = dt.date.fromisoformat(payload["expires"])
         except ValueError:
             pass
-    return Entitlement(plan=plan, name=payload.get("name") or "", apps=apps, admin_panel=bool(admin_panel), expires=expires)
+    deny = frozenset() if plan in plans.ALL_APPS_PLANS else frozenset(str(x) for x in (payload.get("perm_deny") or []))
+    return Entitlement(plan=plan, name=payload.get("name") or "", apps=apps, admin_panel=bool(admin_panel),
+                       expires=expires, perm_deny=deny)
 
 
 # ---------------------------------------------------------------- license check
@@ -272,6 +275,8 @@ def _injection(ent: Entitlement) -> bytes:
     badge = ent.plan_label + (f" · {app_version()}" if app_version() else "")
     if days is not None and (ent.plan == "trial" or days <= 30):
         badge += f" · {max(days, 0)} day{'s' if days != 1 else ''} left"
+    hide_login = ("<style>a[href=\"/login\"],a[href=\"/signup\"],a[href=\"/forgot-password\"],"
+                  "form[action=\"/logout\"]{display:none!important}</style>")
     script = ""
     if blocked:
         script = ("<script>(function(){var b=" + json.dumps(blocked) + ";document.querySelectorAll('a[href]').forEach(function(a){"
@@ -280,7 +285,79 @@ def _injection(ent: Entitlement) -> bytes:
     pill = ('<a href="/__license" style="position:fixed;left:10px;bottom:8px;z-index:9998;font:600 12px/1 \'Segoe UI\',sans-serif;'
             'background:#8a4b14;color:#fff;border-radius:999px;padding:5px 11px;text-decoration:none;opacity:.85" '
             f'title="Your license">{html.escape(badge)}</a>')
-    return (pill + script).encode("utf-8")
+    return (hide_login + pill + script).encode("utf-8")
+
+
+# ---------------------------------------------------------------- feature permissions + automatic local sign-in
+def feature_allowed(module: str, tab: str | None = None, element: str | None = None) -> bool:
+    """False when the license key switched this tab / element OFF (the Key Maker's permission window)."""
+    ent, _why = entitlement()
+    if ent is None or not ent.perm_deny:
+        return True
+    if tab is None:
+        return True
+    if f"{module}/{tab}" in ent.perm_deny:
+        return False
+    return element is None or f"{module}/{tab}/{element}" not in ent.perm_deny
+
+
+def install_runtime_patches() -> None:
+    """Called by licensed_server.py BEFORE the original app is imported: the app's own has_tab / has_element / get_current_user
+    are wrapped (the app's files are not touched). Anything the key switched off stays off -- even for the local admin account --
+    and the signed-in account only has admin rights when the key includes the Admin panel."""
+    import core.paths  # noqa: F401 -- puts the app's folders on sys.path
+    import core.auth as auth
+    import core.permissions as perms
+
+    original_tab, original_element = perms.has_tab, perms.has_element
+    perms.has_tab = lambda user, is_admin, module, tab: (
+        feature_allowed(module, tab) and original_tab(user, is_admin, module, tab))
+    perms.has_element = lambda user, is_admin, module, tab, element: (
+        feature_allowed(module, tab, element) and original_element(user, is_admin, module, tab, element))
+
+    original_user = auth.get_current_user
+
+    def licensed_user(request):
+        user = original_user(request)
+        if user is None:
+            return None
+        ent, _why = entitlement()
+        user = dict(user)
+        user.update(is_admin=bool(ent and ent.admin_panel), is_master=True, approved=True, disabled=False,
+                    paid_until=None, must_change_password=False)
+        return user
+    auth.get_current_user = licensed_user
+
+
+_LOCAL_ACCOUNT = "admin"
+_NO_LOGIN_PAGES = ("/login", "/signup", "/forgot-password", "/approval-status")
+
+
+def _session_cookie(headers) -> str:
+    for k, v in headers:
+        if k == b"cookie":
+            for part in v.decode("latin-1").split(";"):
+                name, _, value = part.strip().partition("=")
+                if name == "session_token":
+                    return value
+    return ""
+
+
+def _ensure_local_session(scope) -> str | None:
+    """No sign-in screen: a PC with a license is always signed in as its one local account. Returns a Set-Cookie value when a
+    new session had to be created (the request's own Cookie header is patched too, so this very request is signed in)."""
+    try:
+        import users_db
+        if users_db.verify_session(_session_cookie(scope.get("headers", []))):
+            return None
+        if users_db.get_user(_LOCAL_ACCOUNT) is None:
+            users_db.create_user(_LOCAL_ACCOUNT, os.urandom(12).hex(), is_admin=True, must_change_password=False, approved=True)
+        token = users_db.create_session(_LOCAL_ACCOUNT, is_admin=True, is_master=True, user_agent="desktop", ip="127.0.0.1")
+    except Exception:
+        return None
+    cookie = f"session_token={token}"
+    scope["headers"] = [(k, v) for k, v in scope.get("headers", []) if k != b"cookie"] + [(b"cookie", cookie.encode("latin-1"))]
+    return f"{cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
 
 
 # ---------------------------------------------------------------- ASGI wrapper
@@ -310,6 +387,9 @@ class LicenseGate:
                 await self._send(send, 403, b"This copy is not activated.", [(b"content-type", b"text/plain")])
             return
 
+        if path in _NO_LOGIN_PAGES or path.startswith(("/signup/", "/forgot-password/")) or path == "/logout":
+            await self._send(send, 303, b"", [(b"location", b"/")])
+            return
         key = plans.app_for_path(path)
         if key and key not in ent.apps:
             await self._blocked(scope, send, ent, plans.APP_LABEL.get(key, key))
@@ -317,6 +397,16 @@ class LicenseGate:
         if plans.is_admin_path(path) and not ent.admin_panel:
             await self._blocked(scope, send, ent, "The Admin panel")
             return
+        scope = dict(scope)
+        set_cookie = _ensure_local_session(scope)
+        if set_cookie:
+            inner_send = send
+
+            async def send(message, _inner=inner_send):                       # noqa: F811
+                if message["type"] == "http.response.start":
+                    message = dict(message)
+                    message["headers"] = list(message.get("headers", [])) + [(b"set-cookie", set_cookie.encode("latin-1"))]
+                await _inner(message)
         await self._run_app(scope, receive, send, ent)
 
     # -- pass a request to the app, adding the plan badge / hiding blocked links on HTML pages
