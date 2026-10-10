@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs
 
+import entitlements
 import plans
 import platform_paths
 
@@ -145,6 +146,23 @@ def verify_license_text(text: str, mid: str | None = None) -> tuple[bool, str, d
     return True, "ok", payload
 
 
+def _apply_override(ent: "Entitlement", ov: dict) -> "Entitlement":
+    """A signed change pushed from GitHub (entitlements.py) on top of the key. Missing fields leave the key's value alone."""
+    if "modules" in ov:
+        mods = ov["modules"]
+        ent.apps = set(plans.APP_KEYS) if (mods is None or ent.plan in plans.ALL_APPS_PLANS) else {m for m in mods if m in plans.APP_KEYS}
+    if "admin_panel" in ov:
+        ent.admin_panel = bool(ov["admin_panel"])
+    if "perm_deny" in ov and ent.plan not in plans.ALL_APPS_PLANS:
+        ent.perm_deny = frozenset(str(x) for x in (ov["perm_deny"] or []))
+    if "expires" in ov:
+        try:
+            ent.expires = dt.date.fromisoformat(ov["expires"]) if ov["expires"] else None
+        except ValueError:
+            pass
+    return ent
+
+
 _cache: dict = {"until": 0.0, "ent": None, "why": ""}
 
 
@@ -157,8 +175,22 @@ def entitlement() -> tuple[Entitlement | None, str]:
     ent, why = None, ""
     if ent is None and LICENSE_FILE.exists():
         good, msg, payload = verify_license_text(LICENSE_FILE.read_text(encoding="utf-8"), mid)
+        ov = entitlements.load()
+        if ov and ov.get("machine") != mid:
+            ov = None
+        if not good and ov and payload.get("machine") == mid and msg.startswith("That license expired") and ov.get("expires"):
+            try:                                              # the owner extended this license without a new key
+                if dt.date.fromisoformat(ov["expires"]) >= dt.date.today():
+                    good = True
+            except ValueError:
+                pass
         if good:
             ent = _entitlement_from_payload(payload)
+            if ov:
+                if ov.get("disabled"):
+                    ent, why = None, "This license has been switched off. Please contact the person who supplied the software."
+                else:
+                    ent = _apply_override(ent, ov)
         else:
             why = msg
     _cache.update(until=now + 5, ent=ent, why=why)
