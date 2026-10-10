@@ -1,0 +1,71 @@
+name: Build Mac app
+
+# Run it from the Actions tab ("Run workflow"). The source repository is only READ (never changed).
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch of the source repository to package"
+        default: "main"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # Apple Silicon (M1/M2/M3...)
+            arch: arm64
+          - os: macos-15-intel    # Intel Macs
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: This repository (packaging files)
+        uses: actions/checkout@v4
+
+      - name: Source repository (private, read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SOURCE_REPO || 'anilkprajapati/v2_astrology' }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+
+      - name: Place database (from the mac-data release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data
+          gh release download mac-data --pattern "places.db.gz" --dir data --repo "${{ github.repository }}"
+          gunzip -f data/places.db.gz
+          ls -l data
+
+      - name: Version
+        id: ver
+        run: |
+          COUNT=$(git -C source rev-list --count HEAD)
+          REV=$(cat mac/revision.txt 2>/dev/null || echo 0)
+          echo "version=1.$(date +%Y).$(date +%m%d).$((COUNT + REV))" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 mac/build_mac.py --source source --places data/places.db \
+            --version "${{ steps.ver.outputs.version }}" --repo "${{ github.repository }}" --arch ${{ matrix.arch }}
+
+      - name: Upload the Mac app
+        uses: actions/upload-artifact@v4
+        with:
+          name: AstroRishi-Mac-${{ matrix.arch }}
+          path: out/AstroRishi-Mac-${{ matrix.arch }}.dmg
+          retention-days: 14
+
+      - name: Upload the update file
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AstroRishi-Mac-Update
+          path: out/AstroRishi-Mac-Update-*.zip
+          retention-days: 14
