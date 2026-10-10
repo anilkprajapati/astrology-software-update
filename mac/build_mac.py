@@ -61,6 +61,8 @@ def stage_app(source: Path, app: Path, places: Path | None, data_files: bool = T
             parts = Path(m.name).parts
             if parts[0] in SKIP_DIRS or parts[-1] in SKIP_NAMES or parts[-1].endswith(".pyc"):
                 continue
+            if not data_files and parts[-1] in ("de440s.bsp", "places.db"):
+                continue                # big data files never go into a code-only update (the kernel is tracked in git now)
             dst = app / m.name
             dst.parent.mkdir(parents=True, exist_ok=True)
             with tar.extractfile(m) as s, open(dst, "wb") as o:
