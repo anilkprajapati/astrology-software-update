@@ -200,9 +200,6 @@ def build(args) -> None:
     stage_python(res / "python", arch)
     install_packages(res / "python", source)
 
-    if not (ROOT / "mac" / "licensing" / "license_public.pem").exists():
-        raise SystemExit("mac/licensing/license_public.pem is missing. Run KeyMaker/keymaker_mac.py once on your Mac "
-                         "(it creates the Mac signing key and copies the public key here), then commit and push it.")
     lic = res / "licensing"
     lic.mkdir()
     for f in (ROOT / "mac" / "licensing").iterdir():
