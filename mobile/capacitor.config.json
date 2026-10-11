@@ -1,0 +1,16 @@
+{
+  "appId": "in.astrorishi.app",
+  "appName": "Astro Rishi",
+  "webDir": "www",
+  "server": {
+    "url": "https://app.astro-rishi.in",
+    "cleartext": false,
+    "errorPath": "offline.html",
+    "allowNavigation": ["app.astro-rishi.in", "*.astro-rishi.in", "checkout.razorpay.com", "api.razorpay.com", "*.razorpay.com"]
+  },
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "automatic", "backgroundColor": "#f4f1ec" },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 1500, "backgroundColor": "#f4f1ec", "showSpinner": false }
+  }
+}
